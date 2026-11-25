@@ -316,7 +316,7 @@ func saveSession() error {
 		return nil
 	}
 	if b, e := notesRTF(); e == nil {
-		if e = os.WriteFile(filepath.Join(app.folder, "notes.rtf"), b, 0600); e != nil {
+		if e = atomicWrite(filepath.Join(app.folder, "notes.rtf"), b); e != nil {
 			return e
 		}
 	} else {
@@ -523,7 +523,7 @@ func processWaves() {
 	}
 }
 func submitChunk(r *recorder) {
-	if len(r.chunk) < sampleRate*2*2 {
+	if len(r.chunk) < sampleRate*2/4 {
 		return
 	} // skip tiny residual clips
 	data := append([]byte(nil), r.chunk...)
@@ -965,13 +965,14 @@ func main() {
 	defer ole.NewProc("OleUninitialize").Call()
 	kernel.NewProc("LoadLibraryW").Call(uintptr(unsafe.Pointer(u("Msftedit.dll"))))
 	class := u("ClassHelperNativeWindow")
-	wc := winClass{style: 3, wndProc: syscall.NewCallback(wndProc), background: 6, className: uintptr(unsafe.Pointer(class))}
+	inst := call(kernel.NewProc("GetModuleHandleW"), 0)
+	wc := winClass{style: 3, wndProc: syscall.NewCallback(wndProc), background: 6, className: uintptr(unsafe.Pointer(class)), inst: inst}
 	wc.size = uint32(unsafe.Sizeof(wc))
 	wc.cursor = call(user.NewProc("LoadCursorW"), 0, 32512)
 	if call(pRegisterClass, uintptr(unsafe.Pointer(&wc))) == 0 {
 		panic("RegisterClassExW failed")
 	}
-	hwnd := create("ClassHelperNativeWindow", "课堂助手 Class Helper", wsOverlappedWindow|wsVisible|wsClipChildren, 70, 45, 1250, 850, 0, 0)
+	hwnd := call(pCreateWindow, 0, uintptr(unsafe.Pointer(u("ClassHelperNativeWindow"))), uintptr(unsafe.Pointer(u("课堂助手 Class Helper"))), wsOverlappedWindow|wsVisible|wsClipChildren, 70, 45, 1250, 850, 0, 0, inst, 0)
 	if hwnd == 0 {
 		panic("CreateWindowExW failed")
 	}
