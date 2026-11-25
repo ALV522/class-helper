@@ -1,0 +1,7 @@
+*.exe
+*.zip
+*.test
+*.out
+*.key
+.env
+.DS_Store
