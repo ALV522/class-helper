@@ -199,17 +199,12 @@ func truncate(s string, n int) string {
 	return string(r[:n]) + "…"
 }
 
-func packageSession(folder, dest string) error {
-	// Never include local secrets. Only classroom materials under the session directory.
-	out, err := os.Create(dest)
-	if err != nil {
-		return err
-	}
-	zw := zip.NewWriter(out)
-	paths := []string{}
-	err = filepath.Walk(folder, func(p string, info os.FileInfo, e error) error {
-		if e != nil {
-			return e
+func packageSession(folder, dest string) (err error) {
+	// ZIP includes only classroom files and never any API credentials.
+	paths := make([]string, 0, 16)
+	if err = filepath.Walk(folder, func(p string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
 		if info.IsDir() {
 			return nil
@@ -217,56 +212,73 @@ func packageSession(folder, dest string) error {
 		if strings.HasSuffix(info.Name(), ".tmp") || strings.HasSuffix(info.Name(), ".key") {
 			return nil
 		}
-		if filepath.Clean(p) == filepath.Clean(dest) {
-			return nil
+		if filepath.Clean(p) != filepath.Clean(dest) {
+			paths = append(paths, p)
 		}
-		paths = append(paths, p)
 		return nil
-	})
-	if err != nil {
-		zw.Close()
-		out.Close()
+	}); err != nil {
 		return err
 	}
 	sort.Strings(paths)
-	for _, p := range paths {
-		rel, _ := filepath.Rel(folder, p)
-		name := filepath.ToSlash(rel)
-		h, err := zip.FileInfoHeader(mustStat(p))
-		if err != nil {
-			break
-		}
-		h.Name = name
-		h.Method = zip.Deflate
-		w, e := zw.CreateHeader(h)
-		if e != nil {
-			err = e
-			break
-		}
-		in, e := os.Open(p)
-		if e != nil {
-			err = e
-			break
-		}
-		_, e = io.Copy(w, in)
-		in.Close()
-		if e != nil {
-			err = e
-			break
-		}
-	}
-	closeErr := zw.Close()
-	fileErr := out.Close()
+	out, err := os.Create(dest)
 	if err != nil {
-		os.Remove(dest)
 		return err
 	}
-	if closeErr != nil {
-		return closeErr
+	defer func() {
+		if err != nil {
+			_ = os.Remove(dest)
+		}
+	}()
+	zw := zip.NewWriter(out)
+	for _, p := range paths {
+		rel, e := filepath.Rel(folder, p)
+		if e != nil {
+			err = e
+			break
+		}
+		info, e := os.Stat(p)
+		if e != nil {
+			err = e
+			break
+		}
+		h, e := zip.FileInfoHeader(info)
+		if e != nil {
+			err = e
+			break
+		}
+		h.Name = filepath.ToSlash(rel)
+		h.Method = zip.Deflate
+		writer, e := zw.CreateHeader(h)
+		if e != nil {
+			err = e
+			break
+		}
+		input, e := os.Open(p)
+		if e != nil {
+			err = e
+			break
+		}
+		_, copyErr := io.Copy(writer, input)
+		closeErr := input.Close()
+		if copyErr != nil {
+			err = copyErr
+			break
+		}
+		if closeErr != nil {
+			err = closeErr
+			break
+		}
+	}
+	zipErr := zw.Close()
+	fileErr := out.Close()
+	if err != nil {
+		return err
+	}
+	if zipErr != nil {
+		return zipErr
 	}
 	return fileErr
 }
-func mustStat(p string) os.FileInfo { s, _ := os.Stat(p); return s }
 
 // chunkFileNames returns pending audio chunks not acknowledged by a successful ASR request.
 func chunkFileNames(folder string) ([]string, error) {
