@@ -1,0 +1,39 @@
+name: Build Windows EXE
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+      - name: Run tests
+        run: go test ./...
+      - name: Build Windows native EXE
+        run: go build -trimpath -ldflags="-H=windowsgui -s -w" -o ClassHelper.exe .
+      - name: Attach build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClassHelper-Windows
+          path: ClassHelper.exe
+          if-no-files-found: error
+      - name: Publish nightly preview
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view nightly --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create nightly --repo $env:GITHUB_REPOSITORY --title "Class Helper Windows Preview" --notes "Unverified preview build. See README for limitations." --prerelease --target $env:GITHUB_SHA
+          }
+          gh release upload nightly ClassHelper.exe --clobber --repo $env:GITHUB_REPOSITORY
